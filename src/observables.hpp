@@ -36,39 +36,20 @@ __global__ void calc_observables_kernel(int N, int num_realizations, int t,
     int global_id = r * N + i;
     int r_offset = r * N;
 
-    __shared__ double s_T_kin[256];
-    __shared__ double s_V_M[256];
-    __shared__ double s_V_A[256];
-    __shared__ double s_u_dot_u0[256];
-    __shared__ double s_Et_mult_E0[256];
-    __shared__ double s_rel_u_dot_u0[256];
-    __shared__ double s_v_dot_v0[256];
-    __shared__ double s_len_t[256];
+    // Single shared array to be recycled (drops shared memory usage from 34.8 KB to 2 KB)
+    __shared__ double s_reduce[256];
 
-    __shared__ double s_S_mean[256];
-    __shared__ double s_B_mean[256];
-    __shared__ double s_C_SS[256];
-    __shared__ double s_C_SB[256];
-    __shared__ double s_C_BS[256];
-    __shared__ double s_C_BB[256];
-    __shared__ double s_G_SS[256];
-    __shared__ double s_G_SB[256];
-    __shared__ double s_G_BB[256];
-
-    s_T_kin[tid] = 0.0; s_V_M[tid] = 0.0; s_V_A[tid] = 0.0;
-    s_u_dot_u0[tid] = 0.0; s_Et_mult_E0[tid] = 0.0;
-    s_rel_u_dot_u0[tid] = 0.0; s_v_dot_v0[tid] = 0.0; s_len_t[tid] = 0.0;
-
-    s_S_mean[tid] = 0.0; s_B_mean[tid] = 0.0;
-    s_C_SS[tid] = 0.0; s_C_SB[tid] = 0.0; s_C_BS[tid] = 0.0; s_C_BB[tid] = 0.0;
-    s_G_SS[tid] = 0.0; s_G_SB[tid] = 0.0; s_G_BB[tid] = 0.0;
+    double val_T_kin = 0.0, val_V_M = 0.0, val_V_A = 0.0;
+    double val_u_dot_u0 = 0.0, val_Et_mult_E0 = 0.0;
+    double val_rel_u_dot_u0 = 0.0, val_v_dot_v0 = 0.0, val_len_t = 0.0;
+    double val_S = 0.0, val_B = 0.0;
+    double val_C_SS = 0.0, val_C_SB = 0.0, val_C_BS = 0.0, val_C_BB = 0.0;
+    double val_G_SS = 0.0, val_G_SB = 0.0, val_G_BB = 0.0;
 
     if (i < N) {
-        double T_kin = (pX[global_id] * pX[global_id] + pY[global_id] * pY[global_id]) / (2.0 * PHYS_M_C);
-        double V_M = 0.0;
-        double local_V_M = 0.0;
-        double V_A = 0.0;
+        val_T_kin = (pX[global_id] * pX[global_id] + pY[global_id] * pY[global_id]) / (2.0 * PHYS_M_C);
 
+        double local_V_M = 0.0;
         double local_dS_i = 0.0;
         double local_dB_i = 0.0;
         double vX_i = pX[global_id] / PHYS_M_C;
@@ -86,7 +67,7 @@ __global__ void calc_observables_kernel(int N, int num_realizations, int t,
                 double bond_E = PHYS_D * (exp_term - 1.0) * (exp_term - 1.0);
 
                 if (i < n_local) {
-                    V_M += bond_E;
+                    val_V_M += bond_E;
                 }
                 local_V_M += 0.5 * bond_E;
 
@@ -155,32 +136,28 @@ __global__ void calc_observables_kernel(int N, int num_realizations, int t,
         int n1 = neighbors[1 * N + i];
         int n2 = neighbors[2 * N + i];
 
-        add_angle_energy_and_dot(n0, 0, n1, 1, V_A, local_dB_i);
-        add_angle_energy_and_dot(n1, 1, n2, 2, V_A, local_dB_i);
-        add_angle_energy_and_dot(n2, 2, n0, 0, V_A, local_dB_i);
+        add_angle_energy_and_dot(n0, 0, n1, 1, val_V_A, local_dB_i);
+        add_angle_energy_and_dot(n1, 1, n2, 2, val_V_A, local_dB_i);
+        add_angle_energy_and_dot(n2, 2, n0, 0, val_V_A, local_dB_i);
 
-        double local_E = T_kin + local_V_M + V_A;
-        double local_S = local_V_M;
-        double local_B = V_A;
+        double local_E = val_T_kin + local_V_M + val_V_A;
+        val_S = local_V_M;
+        val_B = val_V_A;
 
         if (capture_ref) {
             d_E_ref[global_id] = local_E;
-            d_S_ref[global_id] = local_S;
-            d_B_ref[global_id] = local_B;
+            d_S_ref[global_id] = val_S;
+            d_B_ref[global_id] = val_B;
         }
 
-        double u_dot_u0 = (uX[global_id] * uX_ref[global_id]) + (uY[global_id] * uY_ref[global_id]);
-        double Et_mult_E0 = local_E * d_E_ref[global_id];
-        double v_dot_v0 = (pX[global_id] * pX_ref[global_id] + pY[global_id] * pY_ref[global_id]) / (PHYS_M_C * PHYS_M_C);
-
-        double local_rel_acf = 0.0;
-        double local_len_t = 0.0;
+        val_u_dot_u0 = (uX[global_id] * uX_ref[global_id]) + (uY[global_id] * uY_ref[global_id]);
+        val_Et_mult_E0 = local_E * d_E_ref[global_id];
+        val_v_dot_v0 = (pX[global_id] * pX_ref[global_id] + pY[global_id] * pY_ref[global_id]) / (PHYS_M_C * PHYS_M_C);
 
         for (int k = 0; k < 3; ++k) {
             int n_local = neighbors[k * N + i];
             if (i < n_local) {
                 int n_global = r_offset + n_local;
-
                 double rx_t = ideal_dx[k * N + i] + (uX[global_id] - uX[n_global]);
                 double ry_t = ideal_dy[k * N + i] + (uY[global_id] - uY[n_global]);
                 double rx_ref = ideal_dx[k * N + i] + (uX_ref[global_id] - uX_ref[n_global]);
@@ -189,80 +166,58 @@ __global__ void calc_observables_kernel(int N, int num_realizations, int t,
                 double len_t = sqrt(rx_t * rx_t + ry_t * ry_t);
                 double len_ref = sqrt(rx_ref * rx_ref + ry_ref * ry_ref);
 
-                local_rel_acf += len_t * len_ref;
-                local_len_t += len_t;
+                val_rel_u_dot_u0 += len_t * len_ref;
+                val_len_t += len_t;
             }
         }
 
-        s_rel_u_dot_u0[tid] = local_rel_acf;
-        s_len_t[tid] = local_len_t;
+        val_C_SS = val_S * d_S_ref[global_id];
+        val_C_SB = val_S * d_B_ref[global_id];
+        val_C_BS = val_B * d_S_ref[global_id];
+        val_C_BB = val_B * d_B_ref[global_id];
 
-        s_T_kin[tid] = T_kin;
-        s_V_M[tid] = V_M;
-        s_V_A[tid] = V_A;
-        s_u_dot_u0[tid] = u_dot_u0;
-        s_Et_mult_E0[tid] = Et_mult_E0;
-        s_v_dot_v0[tid] = v_dot_v0;
-
-        s_S_mean[tid] = local_S;
-        s_B_mean[tid] = local_B;
-        s_C_SS[tid] = local_S * d_S_ref[global_id];
-        s_C_SB[tid] = local_S * d_B_ref[global_id];
-        s_C_BS[tid] = local_B * d_S_ref[global_id];
-        s_C_BB[tid] = local_B * d_B_ref[global_id];
-
-        s_G_SS[tid] = local_dS_i * local_dS_i;
-        s_G_SB[tid] = local_dS_i * local_dB_i;
-        s_G_BB[tid] = local_dB_i * local_dB_i;
+        val_G_SS = local_dS_i * local_dS_i;
+        val_G_SB = local_dS_i * local_dB_i;
+        val_G_BB = local_dB_i * local_dB_i;
     }
 
-    __syncthreads();
+    int obs_index = t * num_realizations + r;
 
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            s_T_kin[tid] += s_T_kin[tid + s];
-            s_V_M[tid] += s_V_M[tid + s];
-            s_V_A[tid] += s_V_A[tid + s];
-            s_u_dot_u0[tid] += s_u_dot_u0[tid + s];
-            s_Et_mult_E0[tid] += s_Et_mult_E0[tid + s];
-            s_rel_u_dot_u0[tid] += s_rel_u_dot_u0[tid + s];
-            s_v_dot_v0[tid] += s_v_dot_v0[tid + s];
-            s_len_t[tid] += s_len_t[tid + s];
-
-            s_S_mean[tid] += s_S_mean[tid + s];
-            s_B_mean[tid] += s_B_mean[tid + s];
-            s_C_SS[tid] += s_C_SS[tid + s];
-            s_C_SB[tid] += s_C_SB[tid + s];
-            s_C_BS[tid] += s_C_BS[tid + s];
-            s_C_BB[tid] += s_C_BB[tid + s];
-            s_G_SS[tid] += s_G_SS[tid + s];
-            s_G_SB[tid] += s_G_SB[tid + s];
-            s_G_BB[tid] += s_G_BB[tid + s];
-        }
+    // Streamlined block reduction targeting the recycled 2KB shared array
+    auto reduce_and_add = [&](double local_val, double* d_out) {
+        s_reduce[tid] = local_val;
         __syncthreads();
-    }
 
-    if (tid == 0) {
-        int obs_index = t * num_realizations + r;
-        atomicAdd(&d_obs_T_kin[obs_index], s_T_kin[0]);
-        atomicAdd(&d_obs_V_M[obs_index], s_V_M[0]);
-        atomicAdd(&d_obs_V_A[obs_index], s_V_A[0]);
-        atomicAdd(&d_obs_u_dot_u0[obs_index], s_u_dot_u0[0]);
-        atomicAdd(&d_obs_Et_mult_E0[obs_index], s_Et_mult_E0[0]);
-        atomicAdd(&d_obs_rel_u_dot_u0[obs_index], s_rel_u_dot_u0[0]);
-        atomicAdd(&d_obs_v_dot_v0[obs_index], s_v_dot_v0[0]);
-        atomicAdd(&d_obs_len_t[obs_index], s_len_t[0]);
+        for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+            if (tid < s) {
+                s_reduce[tid] += s_reduce[tid + s];
+            }
+            __syncthreads();
+        }
 
-        atomicAdd(&d_obs_S_mean[obs_index], s_S_mean[0]);
-        atomicAdd(&d_obs_B_mean[obs_index], s_B_mean[0]);
-        atomicAdd(&d_obs_C_SS[obs_index], s_C_SS[0]);
-        atomicAdd(&d_obs_C_SB[obs_index], s_C_SB[0]);
-        atomicAdd(&d_obs_C_BS[obs_index], s_C_BS[0]);
-        atomicAdd(&d_obs_C_BB[obs_index], s_C_BB[0]);
-        atomicAdd(&d_obs_G_SS[obs_index], s_G_SS[0]);
-        atomicAdd(&d_obs_G_SB[obs_index], s_G_SB[0]);
-        atomicAdd(&d_obs_G_BB[obs_index], s_G_BB[0]);
-    }
+        if (tid == 0) {
+            atomicAdd(&d_out[obs_index], s_reduce[0]);
+        }
+        __syncthreads(); // Prevent the next variable reduction from trampling the data
+    };
+
+    reduce_and_add(val_T_kin, d_obs_T_kin);
+    reduce_and_add(val_V_M, d_obs_V_M);
+    reduce_and_add(val_V_A, d_obs_V_A);
+    reduce_and_add(val_u_dot_u0, d_obs_u_dot_u0);
+    reduce_and_add(val_Et_mult_E0, d_obs_Et_mult_E0);
+    reduce_and_add(val_rel_u_dot_u0, d_obs_rel_u_dot_u0);
+    reduce_and_add(val_v_dot_v0, d_obs_v_dot_v0);
+    reduce_and_add(val_len_t, d_obs_len_t);
+    reduce_and_add(val_S, d_obs_S_mean);
+    reduce_and_add(val_B, d_obs_B_mean);
+    reduce_and_add(val_C_SS, d_obs_C_SS);
+    reduce_and_add(val_C_SB, d_obs_C_SB);
+    reduce_and_add(val_C_BS, d_obs_C_BS);
+    reduce_and_add(val_C_BB, d_obs_C_BB);
+    reduce_and_add(val_G_SS, d_obs_G_SS);
+    reduce_and_add(val_G_SB, d_obs_G_SB);
+    reduce_and_add(val_G_BB, d_obs_G_BB);
 }
 
 inline void compute_observables(int N, int num_realizations, dim3 blocksPerGrid, dim3 threadsPerBlock, int t,

@@ -19,7 +19,7 @@ function plot_all_observables()
     data_dir = "../../data/"
 
     # Define the list of configurations: (W, H, Target Energy)
-    lattice_configs = [(128, 128, 100), (256, 256, 100),(512, 512, 100) ]
+    lattice_configs = [(100, 100, 100)]
 
     s = 41
     tt = 600
@@ -35,37 +35,59 @@ function plot_all_observables()
     eq_idx_c = div(eq_step_adj, of)
     eq_idx = eq_idx_c + 1
 
-    # Plot reduced to 2 subplots
-    fig = Figure(size=(1600, 1000), fontsize=23)
+    # List of all newly computed signals and their plot labels
+    signals = [
+        ("acf_C_E", "Energy ACF C_E(t)"),
+        ("acf_C_v", "Velocity ACF C_v(t)"),
+        ("acf_C_SS", "Stretch-Stretch C_SS(t)"),
+        ("acf_C_SB", "Stretch-Angle C_SB(t)"),
+        ("acf_C_BS", "Angle-Stretch C_BS(t)"),
+        ("acf_C_BB", "Angle-Angle C_BB(t)"),
+        ("G_SS", "G_SS = <(L S)^2>"),
+        ("G_SB", "G_SB = <(L S)(L B)>"),
+        ("G_BB", "G_BB = <(L B)^2>")
+    ]
+
+    # Dynamically scale figure height based on the number of signals to plot them below one another
+    fig = Figure(size=(1600, 400 * length(signals)), fontsize=23)
     lwidth = 5.0
-
-    ax_auto_ce = Axis(fig[1, 1], xlabel="Time (Post-Equilibration)", ylabel="Energy SCF C_E(t)", yscale = log10)
-    ax_auto_cv = Axis(fig[2, 1], xlabel="Time (Post-Equilibration)", ylabel="Velocity SCF C_V(t)", yscale = log10)
-
     colors = Makie.wong_colors()
+
+    axes = []
+    for (i, (sig_name, sig_label)) in enumerate(signals)
+        # Using linear scale because cross-correlations and covariances might cross zero
+        ax = Axis(fig[i, 1], xlabel="Time (Post-Equilibration)", ylabel=sig_label)
+        push!(axes, ax)
+    end
 
     for (idx, (w, h, energy)) in enumerate(lattice_configs)
         c = colors[mod1(idx, length(colors))]
         e_str = @sprintf("%.2f", energy)
         lbl = "$(w)x$(h), E=$(energy)"
 
-        strEnd = "_w-$(w)_h-$(h)_H-$(e_str)_s-$(s)_tt-$(tt)_eqt-$(eqt_str)_dt-$(dt_str)_r-$(R)_of-$(of)"
+        strEnd = "_w-$(w)_h-$(h)_H-$(e_str)_s-$(s)_tt-$(tt)_eqt-$(eqt_str)_dt-$(dt_str)_r-$(R)_of-$(of).bin"
 
-        # Note spatial function files map to scf_ prefix instead of acf_
-        mean_ce, _, _, num_records = process_observable(joinpath(data_dir, "scf_C_E" * strEnd * ".bin"), R)
-        mean_cv, _, _, _ = process_observable(joinpath(data_dir, "scf_C_v" * strEnd * ".bin"), R)
+        for (i, (sig_name, _)) in enumerate(signals)
+            file_path = joinpath(data_dir, sig_name * strEnd)
 
-        t_phy = (0:num_records-1) .* (dt * of)
-        t_plot = t_phy[eq_idx:end] .- t_phy[eq_idx]
+            if isfile(file_path)
+                mean_val, _, _, num_records = process_observable(file_path, R)
 
-        lines!(ax_auto_ce, t_plot, abs.(mean_ce[eq_idx:end]), color=c, linewidth=lwidth, label="C_E ($lbl)")
-        lines!(ax_auto_cv, t_plot, abs.(mean_cv[eq_idx:end]), color=c, linewidth=lwidth, label="C_V ($lbl)")
+                t_phy = (0:num_records-1) .* (dt * of)
+                t_plot = t_phy[eq_idx:end] .- t_phy[eq_idx]
+
+                lines!(axes[i], t_plot, mean_val[eq_idx:end], color=c, linewidth=lwidth, label=lbl)
+            else
+                println("Warning: File missing for signal $(sig_name) -> $(file_path)")
+            end
+        end
     end
 
-    axislegend(ax_auto_ce, position=:rt)
-    axislegend(ax_auto_cv, position=:rt)
+    for ax in axes
+        axislegend(ax, position=:rt)
+    end
 
-    save("../../img/SCFs_LINLIN_combined_MULT.png", fig)
+    save("../../img/ACFs_Individual_Signals.png", fig)
 end
 
 plot_all_observables()
