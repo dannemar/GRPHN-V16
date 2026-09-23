@@ -3,12 +3,11 @@
 #include <cmath>
 #include <random>
 #include <chrono>
-#include <algorithm>
 
 #include <cuda_runtime.h>
 #include "sim_constants.hpp"
 #include "auxiliary.hpp"
-#include "observables.hpp"
+#include "observables_2.hpp"
 
 int main(int argc, char* argv[]) {
     SimParams params;
@@ -55,7 +54,6 @@ int main(int argc, char* argv[]) {
             int n_idx = neighbors[k * N + i];
             double dx = posX_eq[i] - posX_eq[n_idx];
             double dy = posY_eq[i] - posY_eq[n_idx];
-
             dx -= Lx_eq * std::round(dx / Lx_eq);
             dy -= Ly_eq * std::round(dy / Ly_eq);
 
@@ -83,7 +81,6 @@ int main(int argc, char* argv[]) {
     if (params.target_E > 0.0) {
         double tol = 1e-6;
         int max_iter = 100;
-
         double com_x = 0.0, com_y = 0.0;
         for (int i = 0; i < N; ++i) {
             com_x += posX_eq[i];
@@ -98,14 +95,12 @@ int main(int argc, char* argv[]) {
 
             std::vector<double> base_uX(N, 0.0), base_uY(N, 0.0);
             double sum_ux = 0.0, sum_uy = 0.0;
-
             for (int i = 0; i < N; ++i) {
                 base_uX[i] = dist(gen);
                 base_uY[i] = dist(gen);
                 sum_ux += base_uX[i];
                 sum_uy += base_uY[i];
             }
-
             for (int i = 0; i < N; ++i) {
                 base_uX[i] -= sum_ux / N;
                 base_uY[i] -= sum_uy / N;
@@ -167,47 +162,77 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    double *d_uX, *d_uY, *d_pX, *d_pY;
-    double *d_ideal_dx, *d_ideal_dy;
-    double *d_obs_T_kin, *d_obs_V_M, *d_obs_V_A;
-    double *d_obs_C_MM, *d_obs_C_PP, *d_obs_C_MP, *d_obs_C_PM;
-    double *d_M_site, *d_P_site, *d_M_site_t0, *d_P_site_t0;
+    double *d_uX, *d_uY, *d_uX_ref, *d_uY_ref, *d_pX, *d_pY, *d_pX_ref, *d_pY_ref;
+    double *d_ideal_dx, *d_ideal_dy, *d_E_ref, *d_S_ref, *d_B_ref;
+    double *d_obs_T_kin, *d_obs_V_M, *d_obs_V_A, *d_obs_u_dot_u0;
+    double *d_obs_rel_u_dot_u0, *d_obs_Et_mult_E0, *d_obs_v_dot_v0, *d_obs_len_t;
+    double *d_obs_S_mean, *d_obs_B_mean;
+    double *d_obs_C_SS, *d_obs_C_SB, *d_obs_C_BS, *d_obs_C_BB;
+    double *d_obs_G_SS, *d_obs_G_SB, *d_obs_G_BB;
     int *d_neighbors, *d_rev_idx;
 
     size_t obs_size = num_records * params.num_realizations * sizeof(double);
-    size_t site_size = N_total * sizeof(double);
 
-    cudaMalloc(&d_uX, site_size); cudaMalloc(&d_uY, site_size);
-    cudaMalloc(&d_pX, site_size); cudaMalloc(&d_pY, site_size);
+    cudaMalloc(&d_uX, N_total * sizeof(double));
+    cudaMalloc(&d_uY, N_total * sizeof(double));
+    cudaMalloc(&d_uX_ref, N_total * sizeof(double));
+    cudaMalloc(&d_uY_ref, N_total * sizeof(double));
+    cudaMalloc(&d_pX, N_total * sizeof(double));
+    cudaMalloc(&d_pY, N_total * sizeof(double));
+    cudaMalloc(&d_pX_ref, N_total * sizeof(double));
+    cudaMalloc(&d_pY_ref, N_total * sizeof(double));
+
+    cudaMalloc(&d_E_ref, N_total * sizeof(double));
+    cudaMalloc(&d_S_ref, N_total * sizeof(double));
+    cudaMalloc(&d_B_ref, N_total * sizeof(double));
 
     cudaMalloc(&d_ideal_dx, N * 3 * sizeof(double));
     cudaMalloc(&d_ideal_dy, N * 3 * sizeof(double));
     cudaMalloc(&d_neighbors, N * 3 * sizeof(int));
     cudaMalloc(&d_rev_idx, N * 3 * sizeof(int));
 
-    cudaMalloc(&d_M_site, site_size); cudaMalloc(&d_P_site, site_size);
-    cudaMalloc(&d_M_site_t0, site_size); cudaMalloc(&d_P_site_t0, site_size);
-
-    cudaMalloc(&d_obs_T_kin, obs_size); cudaMalloc(&d_obs_V_M, obs_size);
+    cudaMalloc(&d_obs_T_kin, obs_size);
+    cudaMalloc(&d_obs_V_M, obs_size);
     cudaMalloc(&d_obs_V_A, obs_size);
-    cudaMalloc(&d_obs_C_MM, obs_size); cudaMalloc(&d_obs_C_PP, obs_size);
-    cudaMalloc(&d_obs_C_MP, obs_size); cudaMalloc(&d_obs_C_PM, obs_size);
+    cudaMalloc(&d_obs_u_dot_u0, obs_size);
+    cudaMalloc(&d_obs_rel_u_dot_u0, obs_size);
+    cudaMalloc(&d_obs_Et_mult_E0, obs_size);
+    cudaMalloc(&d_obs_v_dot_v0, obs_size);
+    cudaMalloc(&d_obs_len_t, obs_size);
 
-    cudaMemset(d_M_site_t0, 0, site_size);
-    cudaMemset(d_P_site_t0, 0, site_size);
+    cudaMalloc(&d_obs_S_mean, obs_size);
+    cudaMalloc(&d_obs_B_mean, obs_size);
+    cudaMalloc(&d_obs_C_SS, obs_size);
+    cudaMalloc(&d_obs_C_SB, obs_size);
+    cudaMalloc(&d_obs_C_BS, obs_size);
+    cudaMalloc(&d_obs_C_BB, obs_size);
+    cudaMalloc(&d_obs_G_SS, obs_size);
+    cudaMalloc(&d_obs_G_SB, obs_size);
+    cudaMalloc(&d_obs_G_BB, obs_size);
 
-    cudaMemset(d_obs_T_kin, 0, obs_size);
-    cudaMemset(d_obs_V_M, 0, obs_size);
-    cudaMemset(d_obs_V_A, 0, obs_size);
-    cudaMemset(d_obs_C_MM, 0, obs_size);
-    cudaMemset(d_obs_C_PP, 0, obs_size);
-    cudaMemset(d_obs_C_MP, 0, obs_size);
-    cudaMemset(d_obs_C_PM, 0, obs_size);
+    cudaMemset(d_uX_ref, 0, N_total * sizeof(double));
+    cudaMemset(d_uY_ref, 0, N_total * sizeof(double));
+    cudaMemset(d_pX_ref, 0, N_total * sizeof(double));
+    cudaMemset(d_pY_ref, 0, N_total * sizeof(double));
 
-    cudaMemcpy(d_uX, uX.data(), site_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_uY, uY.data(), site_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_pX, pX.data(), site_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_pY, pY.data(), site_size, cudaMemcpyHostToDevice);
+    cudaMemset(d_E_ref, 0, N_total * sizeof(double));
+    cudaMemset(d_S_ref, 0, N_total * sizeof(double));
+    cudaMemset(d_B_ref, 0, N_total * sizeof(double));
+
+    cudaMemset(d_obs_T_kin, 0, obs_size); cudaMemset(d_obs_V_M, 0, obs_size);
+    cudaMemset(d_obs_V_A, 0, obs_size); cudaMemset(d_obs_u_dot_u0, 0, obs_size);
+    cudaMemset(d_obs_rel_u_dot_u0, 0, obs_size); cudaMemset(d_obs_Et_mult_E0, 0, obs_size);
+    cudaMemset(d_obs_v_dot_v0, 0, obs_size); cudaMemset(d_obs_len_t, 0, obs_size);
+    cudaMemset(d_obs_S_mean, 0, obs_size); cudaMemset(d_obs_B_mean, 0, obs_size);
+    cudaMemset(d_obs_C_SS, 0, obs_size); cudaMemset(d_obs_C_SB, 0, obs_size);
+    cudaMemset(d_obs_C_BS, 0, obs_size); cudaMemset(d_obs_C_BB, 0, obs_size);
+    cudaMemset(d_obs_G_SS, 0, obs_size); cudaMemset(d_obs_G_SB, 0, obs_size);
+    cudaMemset(d_obs_G_BB, 0, obs_size);
+
+    cudaMemcpy(d_uX, uX.data(), N_total * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_uY, uY.data(), N_total * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_pX, pX.data(), N_total * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_pY, pY.data(), N_total * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(d_ideal_dx, ideal_dx.data(), N * 3 * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(d_ideal_dy, ideal_dy.data(), N * 3 * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(d_neighbors, neighbors.data(), N * 3 * sizeof(int), cudaMemcpyHostToDevice);
@@ -227,25 +252,46 @@ int main(int argc, char* argv[]) {
     std::vector<double> h_obs_T_kin(host_obs_count, 0.0);
     std::vector<double> h_obs_V_M(host_obs_count, 0.0);
     std::vector<double> h_obs_V_A(host_obs_count, 0.0);
-    std::vector<double> h_obs_C_MM(host_obs_count, 0.0);
-    std::vector<double> h_obs_C_PP(host_obs_count, 0.0);
-    std::vector<double> h_obs_C_MP(host_obs_count, 0.0);
-    std::vector<double> h_obs_C_PM(host_obs_count, 0.0);
+    std::vector<double> h_obs_u_dot_u0(host_obs_count, 0.0);
+    std::vector<double> h_obs_rel_u_dot_u0(host_obs_count, 0.0);
+    std::vector<double> h_obs_Et_mult_E0(host_obs_count, 0.0);
+    std::vector<double> h_obs_v_dot_v0(host_obs_count, 0.0);
+    std::vector<double> h_obs_len_t(host_obs_count, 0.0);
+    std::vector<double> h_obs_S_mean(host_obs_count, 0.0);
+    std::vector<double> h_obs_B_mean(host_obs_count, 0.0);
+    std::vector<double> h_obs_C_SS(host_obs_count, 0.0);
+    std::vector<double> h_obs_C_SB(host_obs_count, 0.0);
+    std::vector<double> h_obs_C_BS(host_obs_count, 0.0);
+    std::vector<double> h_obs_C_BB(host_obs_count, 0.0);
+    std::vector<double> h_obs_G_SS(host_obs_count, 0.0);
+    std::vector<double> h_obs_G_SB(host_obs_count, 0.0);
+    std::vector<double> h_obs_G_BB(host_obs_count, 0.0);
 
     std::map<std::string, std::vector<double>> obs_hist;
     obs_hist["temperature"].assign(host_obs_count, 0.0);
     obs_hist["relative_error"].assign(host_obs_count, 0.0);
-    obs_hist["acf_C_MM"].assign(host_obs_count, 0.0);
-    obs_hist["acf_C_PP"].assign(host_obs_count, 0.0);
-    obs_hist["acf_C_MP"].assign(host_obs_count, 0.0);
-    obs_hist["acf_C_PM"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_D"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_rel"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_E"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_v"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_SS"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_SB"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_BS"].assign(host_obs_count, 0.0);
+    obs_hist["acf_C_BB"].assign(host_obs_count, 0.0);
+    obs_hist["G_SS"].assign(host_obs_count, 0.0);
+    obs_hist["G_SB"].assign(host_obs_count, 0.0);
+    obs_hist["G_BB"].assign(host_obs_count, 0.0);
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
     compute_observables(N, params.num_realizations, obsBlocks, obsThreads, 0,
-        d_uX, d_uY, d_pX, d_pY, d_neighbors, d_ideal_dx, d_ideal_dy,
-        d_obs_T_kin, d_obs_V_M, d_obs_V_A, d_obs_C_MM, d_obs_C_PP, d_obs_C_MP, d_obs_C_PM,
-        d_M_site, d_P_site, d_M_site_t0, d_P_site_t0, false);
+        d_uX, d_uY, d_uX_ref, d_uY_ref, d_pX, d_pY, d_pX_ref, d_pY_ref,
+        d_neighbors, d_ideal_dx, d_ideal_dy,
+        d_obs_T_kin, d_obs_V_M, d_obs_V_A, d_obs_u_dot_u0, d_obs_Et_mult_E0,
+        d_obs_rel_u_dot_u0, d_obs_v_dot_v0, d_obs_len_t,
+        d_E_ref, d_S_ref, d_B_ref,
+        d_obs_S_mean, d_obs_B_mean, d_obs_C_SS, d_obs_C_SB, d_obs_C_BS, d_obs_C_BB,
+        d_obs_G_SS, d_obs_G_SB, d_obs_G_BB, false);
 
     double dt = params.dt;
 
@@ -268,13 +314,23 @@ int main(int argc, char* argv[]) {
 
         int next_t = t + 1;
         bool capture_ref = (next_t == T_equilibration);
+        if (capture_ref) {
+            cudaMemcpy(d_uX_ref, d_uX, N_total * sizeof(double), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(d_uY_ref, d_uY, N_total * sizeof(double), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(d_pX_ref, d_pX, N_total * sizeof(double), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(d_pY_ref, d_pY, N_total * sizeof(double), cudaMemcpyDeviceToDevice);
+        }
 
         if (next_t % params.obs_freq == 0) {
             int record_idx = next_t / params.obs_freq;
             compute_observables(N, params.num_realizations, obsBlocks, obsThreads, record_idx,
-                d_uX, d_uY, d_pX, d_pY, d_neighbors, d_ideal_dx, d_ideal_dy,
-                d_obs_T_kin, d_obs_V_M, d_obs_V_A, d_obs_C_MM, d_obs_C_PP, d_obs_C_MP, d_obs_C_PM,
-                d_M_site, d_P_site, d_M_site_t0, d_P_site_t0, capture_ref);
+                d_uX, d_uY, d_uX_ref, d_uY_ref, d_pX, d_pY, d_pX_ref, d_pY_ref,
+                d_neighbors, d_ideal_dx, d_ideal_dy,
+                d_obs_T_kin, d_obs_V_M, d_obs_V_A, d_obs_u_dot_u0, d_obs_Et_mult_E0,
+                d_obs_rel_u_dot_u0, d_obs_v_dot_v0, d_obs_len_t,
+                d_E_ref, d_S_ref, d_B_ref,
+                d_obs_S_mean, d_obs_B_mean, d_obs_C_SS, d_obs_C_SB, d_obs_C_BS, d_obs_C_BB,
+                d_obs_G_SS, d_obs_G_SB, d_obs_G_BB, capture_ref);
         }
     }
 
@@ -283,21 +339,36 @@ int main(int argc, char* argv[]) {
     cudaMemcpy(h_obs_T_kin.data(), d_obs_T_kin, obs_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_obs_V_M.data(), d_obs_V_M, obs_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_obs_V_A.data(), d_obs_V_A, obs_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_obs_C_MM.data(), d_obs_C_MM, obs_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_obs_C_PP.data(), d_obs_C_PP, obs_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_obs_C_MP.data(), d_obs_C_MP, obs_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_obs_C_PM.data(), d_obs_C_PM, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_u_dot_u0.data(), d_obs_u_dot_u0, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_rel_u_dot_u0.data(), d_obs_rel_u_dot_u0, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_Et_mult_E0.data(), d_obs_Et_mult_E0, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_v_dot_v0.data(), d_obs_v_dot_v0, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_len_t.data(), d_obs_len_t, obs_size, cudaMemcpyDeviceToHost);
+
+    cudaMemcpy(h_obs_S_mean.data(), d_obs_S_mean, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_B_mean.data(), d_obs_B_mean, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_C_SS.data(), d_obs_C_SS, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_C_SB.data(), d_obs_C_SB, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_C_BS.data(), d_obs_C_BS, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_C_BB.data(), d_obs_C_BB, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_G_SS.data(), d_obs_G_SS, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_G_SB.data(), d_obs_G_SB, obs_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_obs_G_BB.data(), d_obs_G_BB, obs_size, cudaMemcpyDeviceToHost);
 
     std::vector<double> h_H0(params.num_realizations, 0.0);
-    std::vector<double> ref_mean_M(params.num_realizations, 0.0);
-    std::vector<double> ref_mean_P(params.num_realizations, 0.0);
+    std::vector<double> mean_E(params.num_realizations, 0.0);
+    std::vector<double> mean_S_t0(params.num_realizations, 0.0);
+    std::vector<double> mean_B_t0(params.num_realizations, 0.0);
+
     int eq_idx = T_equilibration / params.obs_freq;
 
     for (int r = 0; r < params.num_realizations; ++r) {
         h_H0[r] = h_obs_T_kin[r] + h_obs_V_M[r] + h_obs_V_A[r];
+        mean_E[r] = h_H0[r] / N;
+
         int ref_idx = eq_idx * params.num_realizations + r;
-        ref_mean_M[r] = h_obs_T_kin[ref_idx] / N;
-        ref_mean_P[r] = (h_obs_V_M[ref_idx] + h_obs_V_A[ref_idx]) / N;
+        mean_S_t0[r] = h_obs_S_mean[ref_idx] / N;
+        mean_B_t0[r] = h_obs_B_mean[ref_idx] / N;
     }
 
     for (int record_idx = 0; record_idx < num_records; ++record_idx) {
@@ -310,35 +381,56 @@ int main(int argc, char* argv[]) {
             obs_hist["relative_error"][idx] = std::abs(H_t - h_H0[r]) / h_H0[r];
 
             if (actual_t >= T_equilibration) {
-                obs_hist["acf_C_MM"][idx] = (h_obs_C_MM[idx] / N) - (ref_mean_M[r] * ref_mean_M[r]);
-                obs_hist["acf_C_PP"][idx] = (h_obs_C_PP[idx] / N) - (ref_mean_P[r] * ref_mean_P[r]);
-                obs_hist["acf_C_MP"][idx] = (h_obs_C_MP[idx] / N) - (ref_mean_M[r] * ref_mean_P[r]);
-                obs_hist["acf_C_PM"][idx] = (h_obs_C_PM[idx] / N) - (ref_mean_P[r] * ref_mean_M[r]);
+                obs_hist["acf_C_D"][idx] = (h_obs_u_dot_u0[idx] / N);
+                obs_hist["acf_C_v"][idx] = (h_obs_v_dot_v0[idx] / N);
+                obs_hist["acf_C_E"][idx] = (h_obs_Et_mult_E0[idx] / N) - (mean_E[r] * mean_E[r]);
+
+                double mean_len = h_obs_len_t[idx] / (1.5 * N);
+                obs_hist["acf_C_rel"][idx] = (h_obs_rel_u_dot_u0[idx] / (1.5 * N)) - (mean_len * mean_len);
+
+                obs_hist["acf_C_SS"][idx] = (h_obs_C_SS[idx] / N) - (mean_S_t0[r] * mean_S_t0[r]);
+                obs_hist["acf_C_SB"][idx] = (h_obs_C_SB[idx] / N) - (mean_S_t0[r] * mean_B_t0[r]);
+                obs_hist["acf_C_BS"][idx] = (h_obs_C_BS[idx] / N) - (mean_B_t0[r] * mean_S_t0[r]);
+                obs_hist["acf_C_BB"][idx] = (h_obs_C_BB[idx] / N) - (mean_B_t0[r] * mean_B_t0[r]);
+
+                obs_hist["G_SS"][idx] = h_obs_G_SS[idx] / N;
+                obs_hist["G_SB"][idx] = h_obs_G_SB[idx] / N;
+                obs_hist["G_BB"][idx] = h_obs_G_BB[idx] / N;
             }
         }
     }
 
-    std::vector<double> norm_C_MM(params.num_realizations, 0.0);
-    std::vector<double> norm_C_PP(params.num_realizations, 0.0);
+    std::vector<double> norm_C_D(params.num_realizations, 0.0);
+    std::vector<double> norm_C_v(params.num_realizations, 0.0);
+    std::vector<double> norm_C_E(params.num_realizations, 0.0);
+    std::vector<double> norm_C_rel(params.num_realizations, 0.0);
+    std::vector<double> norm_C_SS(params.num_realizations, 0.0);
+    std::vector<double> norm_C_BB(params.num_realizations, 0.0);
 
     for (int r = 0; r < params.num_realizations; ++r) {
         int ref_idx = eq_idx * params.num_realizations + r;
-        norm_C_MM[r] = obs_hist["acf_C_MM"][ref_idx];
-        norm_C_PP[r] = obs_hist["acf_C_PP"][ref_idx];
+        norm_C_D[r] = obs_hist["acf_C_D"][ref_idx];
+        norm_C_v[r] = obs_hist["acf_C_v"][ref_idx];
+        norm_C_E[r] = obs_hist["acf_C_E"][ref_idx];
+        norm_C_rel[r] = obs_hist["acf_C_rel"][ref_idx];
+        norm_C_SS[r] = obs_hist["acf_C_SS"][ref_idx];
+        norm_C_BB[r] = obs_hist["acf_C_BB"][ref_idx];
     }
 
     for (int record_idx = eq_idx; record_idx < num_records; ++record_idx) {
         for (int r = 0; r < params.num_realizations; ++r) {
             int idx = record_idx * params.num_realizations + r;
 
-            double v_M = norm_C_MM[r];
-            double v_P = norm_C_PP[r];
-            double v_Cross = std::sqrt(std::max(0.0, v_M * v_P));
+            obs_hist["acf_C_D"][idx] = (norm_C_D[r] != 0.0) ? (obs_hist["acf_C_D"][idx] / norm_C_D[r]) : 0.0;
+            obs_hist["acf_C_v"][idx] = (norm_C_v[r] != 0.0) ? (obs_hist["acf_C_v"][idx] / norm_C_v[r]) : 0.0;
+            obs_hist["acf_C_E"][idx] = (norm_C_E[r] != 0.0) ? (obs_hist["acf_C_E"][idx] / norm_C_E[r]) : 0.0;
+            obs_hist["acf_C_rel"][idx] = (norm_C_rel[r] != 0.0) ? (obs_hist["acf_C_rel"][idx] / norm_C_rel[r]) : 0.0;
 
-            obs_hist["acf_C_MM"][idx] = (v_M != 0.0) ? (obs_hist["acf_C_MM"][idx] / v_M) : 0.0;
-            obs_hist["acf_C_PP"][idx] = (v_P != 0.0) ? (obs_hist["acf_C_PP"][idx] / v_P) : 0.0;
-            obs_hist["acf_C_MP"][idx] = (v_Cross != 0.0) ? (obs_hist["acf_C_MP"][idx] / v_Cross) : 0.0;
-            obs_hist["acf_C_PM"][idx] = (v_Cross != 0.0) ? (obs_hist["acf_C_PM"][idx] / v_Cross) : 0.0;
+            double cross_norm = std::sqrt(std::max(0.0, norm_C_SS[r] * norm_C_BB[r]));
+            obs_hist["acf_C_SS"][idx] = (norm_C_SS[r] != 0.0) ? (obs_hist["acf_C_SS"][idx] / norm_C_SS[r]) : 0.0;
+            obs_hist["acf_C_BB"][idx] = (norm_C_BB[r] != 0.0) ? (obs_hist["acf_C_BB"][idx] / norm_C_BB[r]) : 0.0;
+            obs_hist["acf_C_SB"][idx] = (cross_norm != 0.0) ? (obs_hist["acf_C_SB"][idx] / cross_norm) : 0.0;
+            obs_hist["acf_C_BS"][idx] = (cross_norm != 0.0) ? (obs_hist["acf_C_BS"][idx] / cross_norm) : 0.0;
         }
     }
 
@@ -349,15 +441,18 @@ int main(int argc, char* argv[]) {
     save_observables(obs_hist, params);
     std::cout << "Observables saved to ../data/ directory.\n";
 
-    cudaFree(d_uX); cudaFree(d_uY);
-    cudaFree(d_pX); cudaFree(d_pY);
+    cudaFree(d_uX); cudaFree(d_uY); cudaFree(d_uX_ref); cudaFree(d_uY_ref);
+    cudaFree(d_pX); cudaFree(d_pY); cudaFree(d_pX_ref); cudaFree(d_pY_ref);
     cudaFree(d_neighbors); cudaFree(d_rev_idx);
     cudaFree(d_ideal_dx); cudaFree(d_ideal_dy);
-    cudaFree(d_M_site); cudaFree(d_P_site);
-    cudaFree(d_M_site_t0); cudaFree(d_P_site_t0);
+    cudaFree(d_E_ref); cudaFree(d_S_ref); cudaFree(d_B_ref);
+
     cudaFree(d_obs_T_kin); cudaFree(d_obs_V_M); cudaFree(d_obs_V_A);
-    cudaFree(d_obs_C_MM); cudaFree(d_obs_C_PP);
-    cudaFree(d_obs_C_MP); cudaFree(d_obs_C_PM);
+    cudaFree(d_obs_u_dot_u0); cudaFree(d_obs_rel_u_dot_u0);
+    cudaFree(d_obs_Et_mult_E0); cudaFree(d_obs_v_dot_v0); cudaFree(d_obs_len_t);
+    cudaFree(d_obs_S_mean); cudaFree(d_obs_B_mean);
+    cudaFree(d_obs_C_SS); cudaFree(d_obs_C_SB); cudaFree(d_obs_C_BS); cudaFree(d_obs_C_BB);
+    cudaFree(d_obs_G_SS); cudaFree(d_obs_G_SB); cudaFree(d_obs_G_BB);
 
     return 0;
 }
