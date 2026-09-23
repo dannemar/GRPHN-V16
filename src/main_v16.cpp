@@ -7,7 +7,7 @@
 #include <cuda_runtime.h>
 #include "sim_constants.hpp"
 #include "auxiliary.hpp"
-#include "observables_2.hpp"
+#include "observables.hpp"
 
 int main(int argc, char* argv[]) {
     SimParams params;
