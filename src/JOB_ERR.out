@@ -1,0 +1,2 @@
+/var/spool/slurmd.spool/job1332853/slurm_script: line 13: nvcc: command not found
+/var/spool/slurmd.spool/job1332853/slurm_script: line 14: nvcc: command not found

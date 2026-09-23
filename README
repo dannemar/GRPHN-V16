@@ -1,0 +1,12 @@
+NOTE:
+    - Testing {K_i, U_i} as basis for Koopman based methods
+    - Testing {S_i, B_i} as basis for crosscorrelation matrix methods
+
+Build Instructions:
+
+    From the "src" folder, run      : nvcc -x cu -std=c++20 -w --use_fast_math -O3 -arch=native main_v16.cpp -o ../build/grph_v16
+
+    Note, fast-math can be used without introducing unwanted inaccuracies.
+
+Run Instructions (example):
+    From the "src" folder, run: ../build/grph_v16 -w 86 -h 86 -e 100 -s 41 -tt 500 -dt 0.01 -r 10

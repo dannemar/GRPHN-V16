@@ -1,0 +1,43 @@
+
+
+WARNING! The default compiler for the cluster is 11.4.1 and should be sufficient.
+If you loaded this module without really knowing what you are doing then
+please consider unloading it and rather use the default compiler.
+
+
+--------------------------------------------------
+Target energy: H =  100
+Lattice Width:  W = 256;	Lattice Height:  H = 256
+Total Time: 600	 Equilibration Time: 500(time steps: 50000)
+Time step size: dt =  0.01	 (# of sim steps: 60000)
+Observation Freq: 1 steps	 (Total records: 60000)
+Realizations (Batched): 100 (Total threads: 6553600)
+--------------------------------------------------
+Generating new lattice (W=256, H=256)...
+Successfully generated and saved lattice.
+Simulation computation time: 1425.03 seconds.
+Observables saved to ../data/ directory.
+--------------------------------------------------
+Target energy: H =  100
+Lattice Width:  W = 128;	Lattice Height:  H = 128
+Total Time: 600	 Equilibration Time: 500(time steps: 50000)
+Time step size: dt =  0.01	 (# of sim steps: 60000)
+Observation Freq: 1 steps	 (Total records: 60000)
+Realizations (Batched): 100 (Total threads: 1638400)
+--------------------------------------------------
+Generating new lattice (W=128, H=128)...
+Successfully generated and saved lattice.
+Simulation computation time: 356.791 seconds.
+Observables saved to ../data/ directory.
+--------------------------------------------------
+Target energy: H =  100
+Lattice Width:  W = 512;	Lattice Height:  H = 512
+Total Time: 600	 Equilibration Time: 500(time steps: 50000)
+Time step size: dt =  0.01	 (# of sim steps: 60000)
+Observation Freq: 1 steps	 (Total records: 60000)
+Realizations (Batched): 100 (Total threads: 26214400)
+--------------------------------------------------
+Generating new lattice (W=512, H=512)...
+Successfully generated and saved lattice.
+Simulation computation time: 6122.77 seconds.
+Observables saved to ../data/ directory.
